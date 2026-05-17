@@ -561,15 +561,18 @@ class InternalMcpCatalogModel {
   }
 
   static async delete(id: string): Promise<boolean> {
-    // First, find all servers associated with this catalog item
-    const servers = await McpServerModel.findByCatalogId(id);
+    // Cleanup mcp server installations across the catalog item and it's children (presets), if any.
+    const children = await InternalMcpCatalogModel.findChildren(id);
+    const catalogIds = [id, ...children.map((c) => c.id)];
 
-    // Delete each server (which will cascade to tools)
-    for (const server of servers) {
-      await McpServerModel.delete(server.id);
+    for (const catalogId of catalogIds) {
+      const servers = await McpServerModel.findByCatalogId(catalogId);
+      // Deleting each seever cascades it's tools.
+      for (const server of servers) {
+        await McpServerModel.delete(server.id);
+      }
     }
 
-    // Then delete the catalog entry itself
     const deletedRows = await db
       .delete(schema.internalMcpCatalogTable)
       .where(eq(schema.internalMcpCatalogTable.id, id))
