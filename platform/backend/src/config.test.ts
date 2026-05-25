@@ -17,6 +17,7 @@ import config, {
   getOtlpAuthHeaders,
   getTrustedOrigins,
   parseBodyLimit,
+  parseCodeRuntimeDaggerRunnerHost,
   parseCommaSeparatedList,
   parseConnectorSyncMaxDuration,
   parseContentMaxLength,
@@ -1135,6 +1136,47 @@ describe("parseSampleRate", () => {
 
   test("should return default for non-numeric value", () => {
     expect(parseSampleRate("abc", 0.1)).toBe(0.1);
+  });
+});
+
+describe("parseCodeRuntimeDaggerRunnerHost", () => {
+  test("should return undefined when runtime is disabled and host is unset", () => {
+    expect(
+      parseCodeRuntimeDaggerRunnerHost({ enabled: false, envValue: undefined }),
+    ).toBeUndefined();
+  });
+
+  test("should not validate host while runtime is disabled", () => {
+    expect(
+      parseCodeRuntimeDaggerRunnerHost({
+        enabled: false,
+        envValue: "kube-pod://dagger-engine?namespace=dagger",
+      }),
+    ).toBe("kube-pod://dagger-engine?namespace=dagger");
+  });
+
+  test("should return undefined when runtime is enabled but host is unset", () => {
+    expect(
+      parseCodeRuntimeDaggerRunnerHost({ enabled: true, envValue: undefined }),
+    ).toBeUndefined();
+  });
+
+  test("should return undefined for non-TCP runner hosts", () => {
+    expect(
+      parseCodeRuntimeDaggerRunnerHost({
+        enabled: true,
+        envValue: "kube-pod://dagger-engine?namespace=dagger",
+      }),
+    ).toBeUndefined();
+  });
+
+  test("should trim and return TCP runner host", () => {
+    expect(
+      parseCodeRuntimeDaggerRunnerHost({
+        enabled: true,
+        envValue: " tcp://dagger-runtime.dagger.svc.cluster.local:1234 ",
+      }),
+    ).toBe("tcp://dagger-runtime.dagger.svc.cluster.local:1234");
   });
 });
 

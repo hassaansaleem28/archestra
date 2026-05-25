@@ -550,6 +550,57 @@ export const getAnalyticsConfig = () => ({
   },
 });
 
+const mcpServerBaseImage =
+  process.env.ARCHESTRA_ORCHESTRATOR_MCP_SERVER_BASE_IMAGE ||
+  `europe-west1-docker.pkg.dev/friendly-path-465518-r6/archestra-public/mcp-server-base:${appVersion}`;
+
+const defaultCodeRuntimeImage =
+  "ghcr.io/astral-sh/uv:0.9.17-python3.12-bookworm-slim";
+
+/**
+ * resolves the Dagger runner host. A misconfigured host returns `undefined`
+ * (and logs) rather than throwing — config is built at module import, so a
+ * throw here would crash the whole backend over one optional feature.
+ *
+ * @public — exported for testability
+ */
+export const parseCodeRuntimeDaggerRunnerHost = ({
+  enabled,
+  envValue,
+}: {
+  enabled: boolean;
+  envValue: string | undefined;
+}): string | undefined => {
+  const runnerHost = envValue?.trim();
+  if (!enabled) return runnerHost || undefined;
+
+  if (!runnerHost) {
+    logger.error(
+      "ARCHESTRA_CODE_RUNTIME_DAGGER_RUNNER_HOST must be set when ARCHESTRA_CODE_RUNTIME_ENABLED=true — code runtime disabled",
+    );
+    return undefined;
+  }
+
+  if (!runnerHost.startsWith("tcp://")) {
+    logger.error(
+      "ARCHESTRA_CODE_RUNTIME_DAGGER_RUNNER_HOST must use tcp:// — code runtime disabled",
+    );
+    return undefined;
+  }
+
+  return runnerHost;
+};
+
+const codeRuntimeRequested =
+  process.env.ARCHESTRA_CODE_RUNTIME_ENABLED === "true";
+const codeRuntimeDaggerRunnerHost = parseCodeRuntimeDaggerRunnerHost({
+  enabled: codeRuntimeRequested,
+  envValue: process.env.ARCHESTRA_CODE_RUNTIME_DAGGER_RUNNER_HOST,
+});
+// a missing/invalid runner host disables the feature instead of crashing boot.
+const codeRuntimeEnabled =
+  codeRuntimeRequested && codeRuntimeDaggerRunnerHost !== undefined;
+
 const config = {
   frontendBaseUrl,
   api: {
@@ -824,9 +875,7 @@ const config = {
    */
   codegenMode: process.env.CODEGEN === "true",
   orchestrator: {
-    mcpServerBaseImage:
-      process.env.ARCHESTRA_ORCHESTRATOR_MCP_SERVER_BASE_IMAGE ||
-      `europe-west1-docker.pkg.dev/friendly-path-465518-r6/archestra-public/mcp-server-base:${appVersion}`,
+    mcpServerBaseImage,
     kubernetes: {
       namespace: process.env.ARCHESTRA_ORCHESTRATOR_K8S_NAMESPACE || "default",
       kubeconfig: process.env.ARCHESTRA_ORCHESTRATOR_KUBECONFIG,
@@ -840,6 +889,32 @@ const config = {
         process.env.ARCHESTRA_ORCHESTRATOR_K8S_CLUSTER_DOMAIN ||
         "cluster.local",
     },
+  },
+  /**
+   * sandboxed code-execution runtime — lets agents run Python through the
+   * `archestra__run_python` tool. backed by a Dagger Engine; disabled by default.
+   */
+  codeRuntime: {
+    enabled: codeRuntimeEnabled,
+    image: process.env.ARCHESTRA_CODE_RUNTIME_IMAGE || defaultCodeRuntimeImage,
+    /** runner host for the Dagger Engine (sets _EXPERIMENTAL_DAGGER_RUNNER_HOST). */
+    daggerRunnerHost: codeRuntimeDaggerRunnerHost,
+    /** path to a baked-in dagger CLI (sets _EXPERIMENTAL_DAGGER_CLI_BIN). */
+    daggerCliBin:
+      process.env.ARCHESTRA_CODE_RUNTIME_DAGGER_CLI_BIN || undefined,
+    /** hard wall-clock cap per run, and the default when the caller omits one. */
+    timeoutSeconds: parsePositiveInt(
+      process.env.ARCHESTRA_CODE_RUNTIME_TIMEOUT_SECONDS,
+      60,
+    ),
+    maxConcurrent: parsePositiveInt(
+      process.env.ARCHESTRA_CODE_RUNTIME_MAX_CONCURRENT,
+      10,
+    ),
+    maxOutputBytes: parsePositiveInt(
+      process.env.ARCHESTRA_CODE_RUNTIME_MAX_OUTPUT_BYTES,
+      65536,
+    ),
   },
   vault: {
     token: process.env.ARCHESTRA_HASHICORP_VAULT_TOKEN || DEFAULT_VAULT_TOKEN,

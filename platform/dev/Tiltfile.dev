@@ -61,6 +61,11 @@ def get_frontend_env():
 
 frontend_env_vars = get_frontend_env()
 
+code_runtime_enabled = os.getenv('ARCHESTRA_CODE_RUNTIME_ENABLED') == 'true'
+backend_resource_deps = ['db-migrate']
+if code_runtime_enabled:
+  backend_resource_deps.append('dagger-runtime-port-forward')
+
 local_resource(
   'pnpm-install',
   cmd='CI=true pnpm install',
@@ -88,14 +93,14 @@ else:
   # Backend dev server
   local_resource(
     dev_resource_name + '-backend',
-    # Trap ensures all child processes are killed when Tilt stops, preventing orphaned processes from blocking port 3000
-    # Uses pkill -P to kill by parent PID since child processes may have their own process groups on macOS
-    serve_cmd='trap "pkill -TERM -P $$" EXIT INT TERM; ARCHESTRA_LOGGING_LEVEL=debug ARCHESTRA_ANALYTICS=disabled pnpm dev --filter @backend & wait $!',
-    # On Windows, pnpm dev runs directly; cmd.exe handles process termination when Tilt stops
+    # wrapper injects the local TCP runner host when the code runtime is enabled.
+    serve_cmd='sh run-backend-dev.sh',
+    # on Windows, pnpm dev runs directly; cmd.exe handles process termination when Tilt stops.
+    # windows users enabling the code runtime set ARCHESTRA_CODE_RUNTIME_DAGGER_RUNNER_HOST in .env manually.
     serve_cmd_bat='set ARCHESTRA_LOGGING_LEVEL=debug && set ARCHESTRA_ANALYTICS=disabled && pnpm dev --filter @backend',
     labels=['dev'],
-    resource_deps=['db-migrate'],
-    deps=['../.env'],
+    resource_deps=backend_resource_deps,
+    deps=['../.env', 'run-backend-dev.sh'],
   )
 
   # Frontend dev server - waits for backend to be ready
